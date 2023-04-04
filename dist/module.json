@@ -1,0 +1,5 @@
+{
+  "name": "@tgn/socketio",
+  "configKey": "socketio",
+  "version": "1.0.0"
+}
