@@ -19,7 +19,11 @@ export function createSocketServer(http_server, events) {
           server: socket_server
         },
         () => {
-          func(...args);
+          try {
+            func(...args);
+          } catch (err) {
+            console.error(err);
+          }
         }
       );
     });

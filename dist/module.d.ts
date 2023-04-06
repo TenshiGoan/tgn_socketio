@@ -16,6 +16,8 @@ declare module "@nuxt/schema" {
 }
 interface ModuleOptions {
     strict_events: boolean;
+    events_dir: string;
+    types_file: string;
 }
 declare const _default: _nuxt_schema.NuxtModule<ModuleOptions>;
 

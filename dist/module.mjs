@@ -2,6 +2,7 @@ import { addPluginTemplate, defineNuxtModule, createResolver, installModule, upd
 import { globbySync } from 'globby';
 import { addNitroImport } from '@tgn/utils';
 import lodash from 'lodash';
+import FS from 'fs';
 
 function addSocketPlugin() {
   addPluginTemplate({
@@ -11,11 +12,11 @@ function addSocketPlugin() {
     getContents() {
       return [
         `import { defineNuxtPlugin } from "#app";`,
-        `import type { Events } from "#build/tgn/socketio/types";`,
+        `import type { ServerEvents, Events } from "#build/tgn/socketio/types";`,
         `import { type Socket, io as createSocket } from "socket.io-client";`,
         ``,
         `export default defineNuxtPlugin((nuxtApp) => {`,
-        `  const io: Socket<Events> = createSocket({});`,
+        `  const io: Socket<ServerEvents, Events> = createSocket({});`,
         ``,
         `  //if (process.client && process.dev) {`,
         `  //@ts-ignore`,
@@ -35,11 +36,14 @@ const module = defineNuxtModule({
     configKey: "socketio"
   },
   defaults: {
-    strict_events: true
+    strict_events: true,
+    events_dir: "events",
+    types_file: "$types.ts"
   },
   setup(options, nuxt) {
     const resolve = createResolver(import.meta.url).resolve;
-    const events_dir = resolve(nuxt.options.srcDir, "events");
+    const events_dir = resolve(nuxt.options.srcDir, options.events_dir);
+    const types_file = resolve(events_dir, options.types_file);
     nuxt.options.alias["#tgn_socketio_runtime"] = resolve("runtime");
     nuxt.options.watch.push(events_dir);
     installModule("@tgn/virtual-entry");
@@ -59,12 +63,12 @@ const module = defineNuxtModule({
         cwd: events_dir
       });
       for (const file of files) {
+        const from = resolve(events_dir, file);
+        if (from.startsWith(types_file)) {
+          continue;
+        }
         const name = file.slice(0, -3).replaceAll("\\", "/");
-        events.push({
-          name,
-          from: resolve(events_dir, file),
-          default_export: true
-        });
+        events.push({ name, from, default_export: true });
       }
     });
     async function getEvents() {
@@ -77,23 +81,40 @@ const module = defineNuxtModule({
       write: true,
       async getContents(data) {
         const events = await getEvents();
+        const imports = [];
         const events_lines = [];
+        const server_events_lines = [];
         for (const event of events) {
           const name = event.as ?? event.name;
-          if (event.default_export ?? true) {
-            events_lines.push(
-              `  ["${name}"]: Awaited<typeof import("${event.from}")>["default"];`
-            );
-          } else {
-            events_lines.push(
-              `  ["${name}"]: Awaited<typeof import("${event.from}")>["${event.name}"];`
-            );
-          }
+          const field = event.default_export ?? true ? "default" : event.name;
+          const from = event.from.endsWith(".ts") ? event.from.slice(0, -3) : event.from;
+          events_lines.push(
+            `  ["${name}"]: Awaited<typeof import("${from}")>["${field}"];`
+          );
+        }
+        if (options.strict_events === false) {
+          events_lines.push(`  [name: string]: (...args: any[]) => void;`);
+        }
+        server_events_lines.push(`  test: (value :number) => void;`);
+        if (await fileExist(types_file)) {
+          imports.push(
+            `import { ServerEvents as BaseServerEvents } from "${types_file.slice(
+              0,
+              -3
+            )}";`
+          );
+        } else {
+          imports.push("type BaseServerEvents = {};");
         }
         return [
           //
+          ...imports,
           `export type Events = {`,
           ...events_lines,
+          `}`,
+          ``,
+          `export type ServerEvents = BaseServerEvents & {`,
+          ...server_events_lines,
           `}`
         ].join("\n");
       }
@@ -126,5 +147,10 @@ const module = defineNuxtModule({
     });
   }
 });
+function fileExist(path) {
+  return new Promise((resolve) => {
+    FS.access(path, (err) => resolve(!err));
+  });
+}
 
 export { module as default };

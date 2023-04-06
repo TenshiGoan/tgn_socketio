@@ -8,11 +8,11 @@ export function addSocketPlugin() {
     getContents() {
       return [
         `import { defineNuxtPlugin } from "#app";`,
-        `import type { Events } from "#build/tgn/socketio/types";`,
+        `import type { ServerEvents, Events } from "#build/tgn/socketio/types";`,
         `import { type Socket, io as createSocket } from "socket.io-client";`,
         ``,
         `export default defineNuxtPlugin((nuxtApp) => {`,
-        `  const io: Socket<Events> = createSocket({});`,
+        `  const io: Socket<ServerEvents, Events> = createSocket({});`,
         ``,
         `  //if (process.client && process.dev) {`,
         `  //@ts-ignore`,

@@ -8,6 +8,7 @@ import {
 import { globbySync } from "globby";
 import { addNitroImport } from "@tgn/utils";
 import lodash from "lodash";
+import FS from "fs";
 
 import { addSocketPlugin } from "./base/plugin";
 
@@ -30,6 +31,8 @@ declare module "@nuxt/schema" {
 
 export interface ModuleOptions {
   strict_events: boolean;
+  events_dir: string;
+  types_file: string;
 }
 
 export default defineNuxtModule<ModuleOptions>({
@@ -39,10 +42,13 @@ export default defineNuxtModule<ModuleOptions>({
   },
   defaults: {
     strict_events: true,
+    events_dir: "events",
+    types_file: "$types.ts",
   },
   setup(options, nuxt) {
     const resolve = createResolver(import.meta.url).resolve;
-    const events_dir = resolve(nuxt.options.srcDir, "events");
+    const events_dir = resolve(nuxt.options.srcDir, options.events_dir);
+    const types_file = resolve(events_dir, options.types_file);
 
     nuxt.options.alias["#tgn_socketio_runtime"] = resolve("runtime");
     nuxt.options.watch.push(events_dir);
@@ -66,12 +72,12 @@ export default defineNuxtModule<ModuleOptions>({
         cwd: events_dir,
       });
       for (const file of files) {
+        const from = resolve(events_dir, file);
+        if (from.startsWith(types_file)) {
+          continue;
+        }
         const name = file.slice(0, -3).replaceAll("\\", "/");
-        events.push({
-          name,
-          from: resolve(events_dir, file),
-          default_export: true,
-        });
+        events.push({ name, from, default_export: true });
       }
     });
 
@@ -81,32 +87,47 @@ export default defineNuxtModule<ModuleOptions>({
       return events;
     }
 
-    type ad = {
-      asdsa: Awaited<typeof import("../playground/events/test")>["default"];
-    };
-
     addTemplate({
       filename: "tgn/socketio/types.ts",
       write: true,
       async getContents(data) {
         const events = await getEvents();
+        const imports: string[] = [];
         const events_lines: string[] = [];
+        const server_events_lines: string[] = [];
         for (const event of events) {
           const name = event.as ?? event.name;
-          if (event.default_export ?? true) {
-            events_lines.push(
-              `  ["${name}"]: Awaited<typeof import("${event.from}")>["default"];`
-            );
-          } else {
-            events_lines.push(
-              `  ["${name}"]: Awaited<typeof import("${event.from}")>["${event.name}"];`
-            );
-          }
+          const field = event.default_export ?? true ? "default" : event.name;
+          const from = event.from.endsWith(".ts")
+            ? event.from.slice(0, -3)
+            : event.from;
+          events_lines.push(
+            `  ["${name}"]: Awaited<typeof import("${from}")>["${field}"];`
+          );
+        }
+        if (options.strict_events === false) {
+          events_lines.push(`  [name: string]: (...args: any[]) => void;`);
+        }
+        server_events_lines.push(`  test: (value :number) => void;`);
+        if (await fileExist(types_file)) {
+          imports.push(
+            `import { ServerEvents as BaseServerEvents } from "${types_file.slice(
+              0,
+              -3
+            )}";`
+          );
+        } else {
+          imports.push("type BaseServerEvents = {};");
         }
         return [
           //
+          ...imports,
           `export type Events = {`,
           ...events_lines,
+          `}`,
+          ``,
+          `export type ServerEvents = BaseServerEvents & {`,
+          ...server_events_lines,
           `}`,
         ].join("\n");
       },
@@ -143,3 +164,9 @@ export default defineNuxtModule<ModuleOptions>({
     });
   },
 });
+
+function fileExist(path: string) {
+  return new Promise<boolean>((resolve) => {
+    FS.access(path, (err) => resolve(!err));
+  });
+}
